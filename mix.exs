@@ -1,17 +1,21 @@
 defmodule DbSampler.MixProject do
   use Mix.Project
 
+  @source_url "https://github.com/dweinstein/db_sampler"
+
   def project do
     [
       app: :db_sampler,
       version: "0.1.0",
-      elixir: "~> 1.19",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       name: "DbSampler",
+      source_url: @source_url,
       docs: [
-        main: "DbSampler.Sampler",
-        extras: ["README.md"]
+        main: "readme",
+        extras: ["README.md"],
+        source_ref: "main"
       ]
     ]
   end

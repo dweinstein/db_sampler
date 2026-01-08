@@ -1,5 +1,7 @@
 # DbSampler
 
+[![Docs](https://img.shields.io/badge/docs-latest-blue.svg)](https://dweinstein.github.io/db_sampler/)
+
 Sample rows from a PostgreSQL database and export to NDJSON.
 
 ## Installation
