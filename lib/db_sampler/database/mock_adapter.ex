@@ -26,6 +26,36 @@ defmodule DbSampler.Database.MockAdapter do
     {:ok, fun.(nil)}
   end
 
+  @impl true
+  def stream(_conn, sql, params \\ [], _opts \\ []) do
+    limit = List.first(params) || parse_limit_from_sql(sql) || 10
+
+    Stream.resource(
+      fn -> 1 end,
+      fn
+        index when index > limit -> {:halt, index}
+        index ->
+          row = build_sample_row_map(index)
+          {[row], index + 1}
+      end,
+      fn _ -> :ok end
+    )
+  end
+
+  defp build_sample_row_map(index) do
+    now = DateTime.utc_now()
+    created_at = DateTime.add(now, -index * 86400, :second)
+
+    %{
+      "id" => generate_uuid(),
+      "name" => "User #{index}",
+      "email" => "user#{index}@example.com",
+      "active" => rem(index, 3) != 0,
+      "created_at" => created_at,
+      "updated_at" => created_at
+    }
+  end
+
   defp handle_query(sql, params) do
     # Try to get limit from params first, then parse from SQL
     limit = List.first(params) || parse_limit_from_sql(sql) || 10

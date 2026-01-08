@@ -28,4 +28,16 @@ defmodule DbSampler.Database.DefaultAdapter do
   def transaction(conn, fun, opts \\ []) do
     Postgrex.transaction(conn, fun, opts)
   end
+
+  @impl true
+  def stream(conn, sql, params \\ [], opts \\ []) do
+    Postgrex.stream(conn, sql, params, opts)
+    |> Stream.flat_map(fn %Postgrex.Result{columns: cols, rows: rows} ->
+      Enum.map(rows, fn row ->
+        cols
+        |> Enum.zip(row)
+        |> Map.new()
+      end)
+    end)
+  end
 end

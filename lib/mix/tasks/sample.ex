@@ -25,6 +25,8 @@ defmodule Mix.Tasks.Sample do
 
     * `--output`, `-o` - Output file path (default: sample.ndjson)
     * `--timeout` - Query timeout in ms (default: 60000)
+    * `--stream` - Use streaming mode for memory-efficient large exports
+    * `--max-rows` - Rows per chunk when streaming (default: 500)
 
   ## EEx Template Variables
 
@@ -68,6 +70,8 @@ defmodule Mix.Tasks.Sample do
           sql: :string,
           timeout: :integer,
           var: [:string, :keep],
+          stream: :boolean,
+          max_rows: :integer,
           help: :boolean
         ],
         aliases: [t: :table, l: :limit, o: :output, r: :order, s: :sql, h: :help]
@@ -81,13 +85,15 @@ defmodule Mix.Tasks.Sample do
         Application.ensure_all_started(:db_sampler)
         output = Keyword.get(opts, :output, @default_output)
         timeout = Keyword.get(opts, :timeout, @default_timeout)
-        run_sql_mode(opts[:sql], opts, output, timeout)
+        stream = Keyword.get(opts, :stream, false)
+        run_sql_mode(opts[:sql], opts, output, timeout, stream)
 
       opts[:table] ->
         Application.ensure_all_started(:db_sampler)
         output = Keyword.get(opts, :output, @default_output)
         timeout = Keyword.get(opts, :timeout, @default_timeout)
-        run_table_mode(opts, output, timeout)
+        stream = Keyword.get(opts, :stream, false)
+        run_table_mode(opts, output, timeout, stream)
 
       true ->
         print_help()
@@ -116,6 +122,8 @@ defmodule Mix.Tasks.Sample do
     Common Options:
       -o, --output PATH     Output file (default: #{@default_output})
       --timeout MS          Query timeout in ms (default: #{@default_timeout})
+      --stream              Use streaming mode (memory-efficient for large exports)
+      --max-rows N          Rows per chunk when streaming (default: 500)
       -h, --help            Show this help
 
     Examples:
@@ -126,18 +134,26 @@ defmodule Mix.Tasks.Sample do
     """)
   end
 
-  defp run_table_mode(opts, output, timeout) do
+  defp run_table_mode(opts, output, timeout, stream) do
     table = Keyword.fetch!(opts, :table)
     limit = Keyword.get(opts, :limit, @default_limit)
     order_by = Keyword.get(opts, :order)
+    max_rows = Keyword.get(opts, :max_rows)
 
-    Mix.shell().info("Sampling #{limit} rows from #{table}...")
+    mode_text = if stream, do: "Streaming", else: "Sampling"
+    Mix.shell().info("#{mode_text} #{limit} rows from #{table}...")
 
     sample_opts =
       [limit: limit, timeout: timeout]
       |> maybe_add_order_by(order_by)
+      |> maybe_add_max_rows(max_rows)
 
-    case DbSampler.Sampler.export_table(table, output, sample_opts) do
+    export_fn =
+      if stream,
+        do: &DbSampler.Sampler.export_table_stream/3,
+        else: &DbSampler.Sampler.export_table/3
+
+    case export_fn.(table, output, sample_opts) do
       {:ok, row_count} ->
         Mix.shell().info("Successfully wrote #{row_count} rows to #{output}")
 
@@ -151,19 +167,28 @@ defmodule Mix.Tasks.Sample do
     end
   end
 
-  defp run_sql_mode(sql_path, opts, output, timeout) do
+  defp run_sql_mode(sql_path, opts, output, timeout, stream) do
     unless File.exists?(sql_path) do
       Mix.shell().error("SQL file not found: #{sql_path}")
       exit({:shutdown, 1})
     end
 
     assigns = parse_vars(Keyword.get_values(opts, :var))
+    max_rows = Keyword.get(opts, :max_rows)
 
-    Mix.shell().info("Executing SQL from #{sql_path}...")
+    mode_text = if stream, do: "Streaming", else: "Executing"
+    Mix.shell().info("#{mode_text} SQL from #{sql_path}...")
 
-    sample_opts = [timeout: timeout, assigns: assigns]
+    sample_opts =
+      [timeout: timeout, assigns: assigns]
+      |> maybe_add_max_rows(max_rows)
 
-    case DbSampler.Sampler.export_query_file(sql_path, output, sample_opts) do
+    export_fn =
+      if stream,
+        do: &DbSampler.Sampler.export_query_file_stream/3,
+        else: &DbSampler.Sampler.export_query_file/3
+
+    case export_fn.(sql_path, output, sample_opts) do
       {:ok, row_count} ->
         Mix.shell().info("Successfully wrote #{row_count} rows to #{output}")
 
@@ -202,4 +227,7 @@ defmodule Mix.Tasks.Sample do
 
   defp maybe_add_order_by(opts, nil), do: opts
   defp maybe_add_order_by(opts, order_by), do: Keyword.put(opts, :order_by, order_by)
+
+  defp maybe_add_max_rows(opts, nil), do: opts
+  defp maybe_add_max_rows(opts, max_rows), do: Keyword.put(opts, :max_rows, max_rows)
 end

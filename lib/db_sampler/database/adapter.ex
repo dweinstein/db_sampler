@@ -29,4 +29,11 @@ defmodule DbSampler.Database.Adapter do
               opts :: Keyword.t()
             ) :: {:ok, result} | {:error, any()}
             when result: var
+
+  @callback stream(
+              conn :: DBConnection.t(),
+              statement :: String.t(),
+              params :: params(),
+              opts :: Keyword.t()
+            ) :: Enumerable.t()
 end

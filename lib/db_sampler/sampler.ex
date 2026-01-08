@@ -161,6 +161,142 @@ defmodule DbSampler.Sampler do
   end
 
   # =============================================================================
+  # Public API - Streaming Mode
+  # =============================================================================
+
+  @doc """
+  Stream rows from a database table.
+
+  Returns a stream that yields one row (as map) at a time.
+  Must be consumed within a `Database.with_stream/2` transaction wrapper.
+
+  ## Parameters
+    * `conn` - Database connection from `with_stream/2` callback
+    * `table` - Table name to stream from
+
+  ## Options
+    * `:limit` - Number of rows to stream (default: 100)
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:order_by` - ORDER BY clause
+    * `:max_rows` - Rows per chunk from database (default: 500)
+
+  ## Example
+
+      Database.with_stream(fn conn ->
+        conn
+        |> Sampler.stream_table("users", limit: 10_000)
+        |> Stream.each(&process_row/1)
+        |> Stream.run()
+      end)
+  """
+  @spec stream_table(DBConnection.t(), String.t(), keyword()) :: Enumerable.t()
+  def stream_table(conn, table, opts \\ []) do
+    limit = Keyword.get(opts, :limit, @default_limit)
+    order_by = Keyword.get(opts, :order_by)
+    stream_opts = Keyword.take(opts, [:timeout, :max_rows])
+
+    sql =
+      if order_by do
+        "SELECT * FROM #{table} ORDER BY #{order_by} LIMIT $1"
+      else
+        "SELECT * FROM #{table} LIMIT $1"
+      end
+
+    Database.stream_rows(conn, sql, [limit], stream_opts)
+  end
+
+  @doc """
+  Stream rows from a table and write directly to NDJSON file.
+
+  Memory-efficient for large exports - streams rows directly to file
+  without loading all into memory.
+
+  Returns `{:ok, row_count}` on success.
+
+  ## Options
+    * `:limit` - Number of rows to stream (default: 100)
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:order_by` - ORDER BY clause
+    * `:max_rows` - Rows per chunk from database (default: 500)
+  """
+  @spec export_table_stream(String.t(), Path.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def export_table_stream(table, output_path, opts \\ []) do
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
+
+    Database.with_stream(
+      fn conn ->
+        file = File.open!(output_path, [:write, :utf8])
+
+        try do
+          count =
+            conn
+            |> stream_table(table, opts)
+            |> Stream.map(&encode_row/1)
+            |> Stream.map(&Jason.encode!/1)
+            |> Stream.each(fn json -> IO.puts(file, json) end)
+            |> Enum.count()
+
+          {:ok, count}
+        after
+          File.close(file)
+        end
+      end,
+      timeout: timeout
+    )
+    |> unwrap_transaction_result()
+  end
+
+  @doc """
+  Stream SQL file results directly to NDJSON file.
+
+  Memory-efficient for large exports.
+
+  ## Options
+    * `:params` - Query parameters (default: [])
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:assigns` - EEx template variables
+    * `:max_rows` - Rows per chunk (default: 500)
+  """
+  @spec export_query_file_stream(Path.t(), Path.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  def export_query_file_stream(sql_path, output_path, opts \\ []) do
+    params = Keyword.get(opts, :params, [])
+    timeout = Keyword.get(opts, :timeout, @default_timeout)
+    stream_opts = Keyword.take(opts, [:timeout, :max_rows])
+    assigns = build_assigns(opts)
+
+    with {:ok, template} <- File.read(sql_path),
+         sql <- EEx.eval_string(template, assigns: assigns) do
+      Database.with_stream(
+        fn conn ->
+          file = File.open!(output_path, [:write, :utf8])
+
+          try do
+            count =
+              conn
+              |> Database.stream_rows(sql, params, stream_opts)
+              |> Stream.map(&encode_row/1)
+              |> Stream.map(&Jason.encode!/1)
+              |> Stream.each(fn json -> IO.puts(file, json) end)
+              |> Enum.count()
+
+            {:ok, count}
+          after
+            File.close(file)
+          end
+        end,
+        timeout: timeout
+      )
+      |> unwrap_transaction_result()
+    end
+  end
+
+  defp unwrap_transaction_result({:ok, {:ok, count}}), do: {:ok, count}
+  defp unwrap_transaction_result({:ok, {:error, _} = error}), do: error
+  defp unwrap_transaction_result({:error, _} = error), do: error
+
+  # =============================================================================
   # Private Functions
   # =============================================================================
 

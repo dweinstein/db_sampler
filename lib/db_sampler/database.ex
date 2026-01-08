@@ -38,6 +38,12 @@ defmodule DbSampler.Database do
     adapter().transaction(conn, fun, opts)
   end
 
+  @impl true
+  def stream(conn, sql, params \\ [], opts \\ []) do
+    opts = Keyword.put_new(opts, :timeout, @default_timeout)
+    adapter().stream(conn, sql, params, opts)
+  end
+
   # Convenience functions using default connection
 
   @doc """
@@ -137,5 +143,49 @@ defmodule DbSampler.Database do
       |> Enum.zip(row)
       |> Map.new()
     end)
+  end
+
+  # Streaming functions
+
+  @doc """
+  Stream rows from a SQL query as maps.
+
+  Must be called within a transaction (use `with_stream/2`).
+  Returns a Stream that yields one map per row.
+
+  ## Parameters
+    * `conn` - Database connection from `with_stream/2` callback
+    * `sql` - SQL query string
+    * `params` - Query parameters (default: [])
+    * `opts` - Options
+
+  ## Options
+    * `:max_rows` - Rows per chunk from database (default: 500)
+    * `:timeout` - Query timeout in ms (default: 15_000)
+  """
+  @spec stream_rows(DBConnection.t(), String.t(), list(), keyword()) :: Enumerable.t()
+  def stream_rows(conn, sql, params \\ [], opts \\ []) do
+    stream(conn, sql, params, opts)
+  end
+
+  @doc """
+  Execute a function with streaming support inside a transaction.
+
+  The function receives the database connection which must be passed
+  to `stream_rows/4` for streaming queries.
+
+  ## Example
+
+      Database.with_stream(fn conn ->
+        "SELECT * FROM users"
+        |> Database.stream_rows(conn, [])
+        |> Stream.each(&IO.inspect/1)
+        |> Stream.run()
+      end)
+  """
+  @spec with_stream((DBConnection.t() -> result), keyword()) :: {:ok, result} | {:error, term()}
+        when result: var
+  def with_stream(fun, opts \\ []) do
+    run_transaction(fun, opts)
   end
 end

@@ -114,4 +114,77 @@ defmodule DbSampler do
   @spec export_query_file(Path.t(), Path.t(), keyword()) ::
           {:ok, non_neg_integer()} | {:error, term()}
   defdelegate export_query_file(sql_path, output_path, opts \\ []), to: DbSampler.Sampler
+
+  # ===========================================================================
+  # Streaming API
+  # ===========================================================================
+
+  @doc """
+  Execute a function with streaming database support.
+
+  The function receives the database connection which must be passed
+  to streaming functions.
+
+  ## Example
+
+      DbSampler.with_stream(fn conn ->
+        conn
+        |> DbSampler.stream_table("users", limit: 10_000)
+        |> Stream.each(&IO.inspect/1)
+        |> Stream.run()
+      end)
+  """
+  defdelegate with_stream(fun, opts \\ []), to: DbSampler.Database
+
+  @doc """
+  Stream rows from a database table.
+
+  Must be called within `with_stream/2`. Returns a stream that yields
+  one row (as map) at a time.
+
+  ## Parameters
+    * `conn` - Database connection from `with_stream/2` callback
+    * `table` - Table name to stream from
+
+  ## Options
+    * `:limit` - Number of rows to stream (default: 100)
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:order_by` - ORDER BY clause
+    * `:max_rows` - Rows per chunk from database (default: 500)
+  """
+  @spec stream_table(DBConnection.t(), String.t(), keyword()) :: Enumerable.t()
+  defdelegate stream_table(conn, table, opts \\ []), to: DbSampler.Sampler
+
+  @doc """
+  Stream rows from a table directly to NDJSON file.
+
+  Memory-efficient for large exports - streams rows directly to file
+  without loading all into memory.
+
+  Returns `{:ok, row_count}` on success.
+
+  ## Options
+    * `:limit` - Number of rows to stream (default: 100)
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:order_by` - ORDER BY clause
+    * `:max_rows` - Rows per chunk from database (default: 500)
+  """
+  @spec export_table_stream(String.t(), Path.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  defdelegate export_table_stream(table, output_path, opts \\ []), to: DbSampler.Sampler
+
+  @doc """
+  Stream SQL file results directly to NDJSON file.
+
+  Memory-efficient for large exports.
+
+  ## Options
+    * `:params` - Query parameters (default: [])
+    * `:timeout` - Query timeout in ms (default: 60_000)
+    * `:assigns` - EEx template variables
+    * `:max_rows` - Rows per chunk (default: 500)
+  """
+  @spec export_query_file_stream(Path.t(), Path.t(), keyword()) ::
+          {:ok, non_neg_integer()} | {:error, term()}
+  defdelegate export_query_file_stream(sql_path, output_path, opts \\ []), to: DbSampler.Sampler
 end
