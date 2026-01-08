@@ -1,0 +1,18 @@
+-- Sample users with EEx templating
+-- Variables: @dev, @test, @prod (auto), @date (auto)
+-- Custom: assigns[:limit], assigns[:active_only]
+SELECT
+    id,
+    name,
+    email,
+    active,
+    created_at,
+    updated_at
+FROM users
+<%= if assigns[:active_only] do %>
+WHERE active = true
+<% end %>
+ORDER BY created_at DESC
+<%= if @dev or @test do %>
+LIMIT <%= assigns[:limit] || 100 %>
+<% end %>

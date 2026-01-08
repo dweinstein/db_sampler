@@ -1,0 +1,12 @@
+-- Simple test query using PostgreSQL system tables
+SELECT
+    schemaname,
+    tablename,
+    tableowner,
+    hasindexes,
+    hasrules,
+    hastriggers
+FROM pg_catalog.pg_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY schemaname, tablename
+LIMIT <%= assigns[:limit] || 10 %>
